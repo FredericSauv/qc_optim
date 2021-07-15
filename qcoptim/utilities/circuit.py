@@ -8,10 +8,10 @@ from numpy import arccos as acos
 from numpy import arctan as atan
 
 from qiskit import QuantumCircuit
-from qiskit.circuit import Measure
+from qiskit.circuit import Gate, Measure
 from qiskit.circuit.library import RZGate, RYGate
 from qiskit.utils import QuantumInstance
-from qiskit.quantum_info import random_unitary
+from qiskit.quantum_info import random_unitary, Operator
 
 from .core import prefix_to_names
 from .pytket import compile_for_backend
@@ -205,36 +205,64 @@ def bind_params(circ, param_values, param_variables=None, param_name=None):
     return bound_circ
 
 
-def _make_identity_random_unitaries(num_qubits, rng):
+def _make_identity_random_unitaries(num_qubits, num_rand, rng):
     """ """
-    return [RZGate(0.) for _ in range(num_qubits)]
+    return [[RZGate(0.) for _ in range(num_qubits)] for _ in range(num_rand)]
 
 
-def _make_1qHaar_random_unitaries(num_qubits, rng):
+def _make_1qHaar_random_unitaries(num_qubits, num_rand, rng):
     """ """
-    unitaries = []
-    for _ in range(num_qubits):
-        unitaries.append(random_unitary(2, seed=rng))
-    return unitaries
+    all_unitaries = []
+    for _ in range(num_rand):
+        unitaries = []
+        for _ in range(num_qubits):
+            unitaries.append(random_unitary(2, seed=rng))
+        all_unitaries.append(unitaries)
+    return all_unitaries
 
 
-def _make_rypiOver3_random_unitaries(num_qubits, rng):
+def _make_rypiOver3_random_unitaries(num_qubits, num_rand, rng):
     """ """
-    unitaries = []
-    
-    # 1/3 of qubits get each rotation angle
-    for idx in range(num_qubits):
-        if idx % 3 == 0:
-            unitaries.append(RYGate(0.))
-        elif idx % 3 == 1:
-            unitaries.append(RYGate(np.pi/3.))
-        elif idx % 3 == 2:
-            unitaries.append(RYGate(2*np.pi/3.))
+    all_unitaries = []
+    for _ in range(num_rand):
+        unitaries = []
 
-    # shuffle positions
-    rng.shuffle(unitaries)
+        # 1/3 of qubits get each rotation angle
+        for idx in range(num_qubits):
+            if idx % 3 == 0:
+                unitaries.append(RYGate(0.))
+            elif idx % 3 == 1:
+                unitaries.append(RYGate(np.pi/3.))
+            elif idx % 3 == 2:
+                unitaries.append(RYGate(2*np.pi/3.))
 
-    return unitaries
+        # shuffle positions
+        rng.shuffle(unitaries)
+        all_unitaries.append(unitaries)
+
+    return all_unitaries
+
+
+def _make_ZY_random_unitaries(num_qubits, num_rand, rng):
+    """ """
+    all_unitaries = []
+
+    z_angles = rng.random((num_rand, num_qubits)) * 2.*np.pi
+    y_angles = 2. * np.arcsin(np.sqrt(rng.random((num_rand, num_qubits))))
+
+    for rand_idx in range(num_rand):
+        unitaries = []
+        for qubit_idx in range(num_qubits):
+            # apply first Z rotation, then Y rotation. (in principle Euler
+            # angles require another Z rotation but we assume this operation is
+            # followed by a measurement in the Z-bais)
+            unitaries.append([
+                RZGate(z_angles[rand_idx, qubit_idx]),
+                RYGate(y_angles[rand_idx, qubit_idx])
+            ])
+        all_unitaries.append(unitaries)
+
+    return all_unitaries
 
 
 def add_random_measurements(
@@ -266,6 +294,9 @@ def add_random_measurements(
             '1qHaar' : single qubit Haar random unitaries
             'rypiOver3' : 1/3 of qubits are acted on by identities, 1/3 by
                           Ry(pi/3), and 1/3 by Ry(2pi/3)
+            'RzRy' : single qubit Haar random unitaries, generated from
+                     selecting euler angles using numpy random functions
+                     instead of qiskit random unitary function
 
     Returns
     -------
@@ -278,30 +309,42 @@ def add_random_measurements(
     if active_qubits is None:
         active_qubits = list(range(circuit.num_qubits))
 
-    rand_meas_circuits = []
-    for _ in range(num_rand):
+    # make rand gates
+    if mode == 'identity':
+        random_gates = _make_identity_random_unitaries(
+            len(active_qubits), num_rand, rng)
+    elif mode == '1qHaar':
+        random_gates = _make_1qHaar_random_unitaries(
+            len(active_qubits), num_rand, rng)
+    elif mode == 'rypiOver3':
+        random_gates = _make_rypiOver3_random_unitaries(
+            len(active_qubits), num_rand, rng)
+    elif mode == 'RzRy':
+        random_gates = _make_ZY_random_unitaries(
+            len(active_qubits), num_rand, rng)
+    else:
+        raise ValueError(
+            'random measurement mode not recognised: '+f'{mode}')
 
-        # make rand gates
-        if mode == 'identity':
-            random_gates = _make_identity_random_unitaries(
-                len(active_qubits), rng)
-        elif mode == '1qHaar':
-            random_gates = _make_1qHaar_random_unitaries(
-                len(active_qubits), rng)
-        elif mode == 'rypiOver3':
-            random_gates = _make_rypiOver3_random_unitaries(
-                len(active_qubits), rng)
-        else:
-            raise ValueError(
-                'random measurement mode not recognised: '+f'{mode}')
+    rand_meas_circuits = []
+    for rand_idx in range(num_rand):
 
         # copy circuit to preserve registers, but remove any final measurements
         new_circ = circuit.copy()
         new_circ.remove_final_measurements()
 
-        # add random single qubit unitaries
-        for qb_idx, rand_gate in zip(active_qubits, random_gates):
-            new_circ.append(rand_gate, [qb_idx])
+        # add pre-measurement unitaries
+        for qb_idx, rand_gate in zip(active_qubits, random_gates[rand_idx]):
+            if isinstance(rand_gate, (Operator, Gate)):
+                new_circ.append(rand_gate, [qb_idx])
+            elif isinstance(rand_gate, list):
+                for _op in rand_gate:
+                    new_circ.append(_op, [qb_idx])
+            else:
+                raise TypeError(
+                    'something has gone wrong. rand_gate type: '
+                    + f'{type(rand_gate)}'+' not recognised.'
+                )
 
         # adapted from qiskit.QuantumCircuit.measure_active() source
         qubits_to_measure = [
@@ -357,9 +400,13 @@ class RandomMeasurementHandler():
                 'pytket' : use pytket compiler
         mode : str, optional
             How to generate the random measurements, supported options:
+                'identity' : trivial case, do nothing
                 '1qHaar' : single qubit Haar random unitaries
                 'rypiOver3' : 1/3 of qubits are acted on by identities, 1/3 by
                               Ry(pi/3), and 1/3 by Ry(2pi/3)
+                'RzRy' : single qubit Haar random unitaries, generated from
+                         selecting euler angles using numpy random functions
+                         instead of qiskit random unitary function
         """
         self.ansatz = ansatz
         self.instance = instance

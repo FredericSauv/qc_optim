@@ -97,73 +97,6 @@ def test_vect_vs_nonvect_auto_cross_correlation_single_u(num_qubits):
         assert np.isclose(non_vect, vect)
 
 
-@pytest.fixture
-def crossfid_test_assets():
-    """ """
-    num_qubits = 2
-    num_random = 100
-    seed = 0
-
-    transpile_instance = make_quantum_instance(_TEST_IBMQ_BACKEND)
-    exe_instance = QuantumInstance(Aer.get_backend('qasm_simulator'))
-
-    circ = QuantumCircuit(num_qubits)
-    circ_ortho = QuantumCircuit(num_qubits)
-    circ_ortho.x(0)
-    circ_superpos = QuantumCircuit(num_qubits)
-    circ_superpos.h(0)
-
-    # get one-side of the data
-    init_crossfid = CrossFidelity(
-        TrivialAnsatz(circ),
-        transpile_instance,
-        transpiler=_TRANSPILER,
-        nb_random=num_random,
-        seed=seed,
-        prefixA='init-data',
-    )
-    circs = init_crossfid.bind_params_to_meas([])
-    results1 = exe_instance.execute(circs)
-    # comparison_results = init_crossfid.tag_results_metadata(results)
-
-    # new objs to compute cross-fidelity overlaps
-    crossfid = CrossFidelity(
-        TrivialAnsatz(circ),
-        transpile_instance,
-        transpiler=_TRANSPILER,
-        nb_random=num_random,
-        seed=seed,
-        prefixA='new-data',
-        prefixB='init-data',
-    )
-    crossfid_ortho = CrossFidelity(
-        TrivialAnsatz(circ_ortho),
-        transpile_instance,
-        transpiler=_TRANSPILER,
-        nb_random=num_random,
-        seed=seed,
-        prefixA='ortho-data',
-        prefixB='init-data',
-    )
-    crossfid_superpos = CrossFidelity(
-        TrivialAnsatz(circ_superpos),
-        transpile_instance,
-        transpiler=_TRANSPILER,
-        nb_random=num_random,
-        seed=seed,
-        prefixA='superpos-data',
-        prefixB='init-data',
-    )
-    circs = crossfid.bind_params_to_meas([])
-    circs += crossfid_ortho.bind_params_to_meas([])
-    circs += crossfid_superpos.bind_params_to_meas([])
-
-    # compute overlaps and test values
-    results2 = exe_instance.execute(circs)
-
-    return crossfid, crossfid_ortho, crossfid_superpos, results1, results2
-
-
 def test_cross_fidelity_circuit_counts():
     """ """
     num_qubits = 2
@@ -171,7 +104,7 @@ def test_cross_fidelity_circuit_counts():
     seed = 0
 
     transpile_instance = make_quantum_instance(_TEST_IBMQ_BACKEND)
-    # exe_instance = QuantumInstance(Aer.get_backend('qasm_simulator'))
+    # exe_instance = QuantumInstance(Aer.get_backend('aer_simulator'))
 
     circ = QuantumCircuit(num_qubits)
     circ_ortho = QuantumCircuit(num_qubits)
@@ -233,11 +166,77 @@ def test_cross_fidelity_circuit_counts():
 
 
 @pytest.mark.parametrize("process_result", [False, True])
-def test_cross_fidelity_nobootstrapping(crossfid_test_assets, process_result):
+@pytest.mark.parametrize("crossfid_mode", ['1qHaar', 'RzRy'])
+@pytest.mark.parametrize("num_bootstraps", [0, 1000])
+def test_cross_fidelity(
+    process_result, crossfid_mode, num_bootstraps
+):
     """ """
 
-    (crossfid, crossfid_ortho, crossfid_superpos, 
-     results1, results2) = crossfid_test_assets
+    num_qubits = 2
+    num_random = 100
+    seed = 0
+
+    transpile_instance = make_quantum_instance(_TEST_IBMQ_BACKEND)
+    exe_instance = QuantumInstance(Aer.get_backend('aer_simulator'))
+
+    circ = QuantumCircuit(num_qubits)
+    circ_ortho = QuantumCircuit(num_qubits)
+    circ_ortho.x(0)
+    circ_superpos = QuantumCircuit(num_qubits)
+    circ_superpos.h(0)
+
+    # get one-side of the data
+    init_crossfid = CrossFidelity(
+        TrivialAnsatz(circ),
+        transpile_instance,
+        transpiler=_TRANSPILER,
+        nb_random=num_random,
+        seed=seed,
+        prefixA='init-data',
+        mode=crossfid_mode,
+    )
+    circs = init_crossfid.bind_params_to_meas([])
+    results1 = exe_instance.execute(circs)
+    # comparison_results = init_crossfid.tag_results_metadata(results)
+
+    # new objs to compute cross-fidelity overlaps
+    crossfid = CrossFidelity(
+        TrivialAnsatz(circ),
+        transpile_instance,
+        transpiler=_TRANSPILER,
+        nb_random=num_random,
+        seed=seed,
+        prefixA='new-data',
+        prefixB='init-data',
+        mode=crossfid_mode,
+    )
+    crossfid_ortho = CrossFidelity(
+        TrivialAnsatz(circ_ortho),
+        transpile_instance,
+        transpiler=_TRANSPILER,
+        nb_random=num_random,
+        seed=seed,
+        prefixA='ortho-data',
+        prefixB='init-data',
+        mode=crossfid_mode,
+    )
+    crossfid_superpos = CrossFidelity(
+        TrivialAnsatz(circ_superpos),
+        transpile_instance,
+        transpiler=_TRANSPILER,
+        nb_random=num_random,
+        seed=seed,
+        prefixA='superpos-data',
+        prefixB='init-data',
+        mode=crossfid_mode,
+    )
+    circs = crossfid.bind_params_to_meas([])
+    circs += crossfid_ortho.bind_params_to_meas([])
+    circs += crossfid_superpos.bind_params_to_meas([])
+
+    # compute overlaps and test values
+    results2 = exe_instance.execute(circs)
 
     if process_result:
         results1 = FastCountsResult(results1)
@@ -250,7 +249,6 @@ def test_cross_fidelity_nobootstrapping(crossfid_test_assets, process_result):
     crossfid_superpos.comparison_results = results1
 
     # set bootstrapping
-    num_bootstraps = 0
     crossfid._num_bootstraps = num_bootstraps
     crossfid_ortho._num_bootstraps = num_bootstraps
     crossfid_superpos._num_bootstraps = num_bootstraps
@@ -281,61 +279,7 @@ def test_cross_fidelity_nobootstrapping(crossfid_test_assets, process_result):
         [same_std, ortho_std, superpos_std],
         [1., 0., 0.5]
     ):
-        np.isclose(mean, target, atol=0.1)
-        # assert mean - 4*std < target
-        # assert mean + 4*std > target
-
-
-@pytest.mark.parametrize("process_result", [False, True])
-def test_cross_fidelity_bootstrapping(crossfid_test_assets, process_result):
-    """ """
-
-    (crossfid, crossfid_ortho, crossfid_superpos,
-     results1, results2) = crossfid_test_assets
-
-    if process_result:
-        results1 = FastCountsResult(results1)
-    if process_result:
-        results2 = FastCountsResult(results2)
-
-    # set comparison results
-    crossfid.comparison_results = results1
-    crossfid_ortho.comparison_results = results1
-    crossfid_superpos.comparison_results = results1
-
-    # set bootstrapping
-    num_bootstraps = 1000
-    crossfid._num_bootstraps = num_bootstraps
-    crossfid_ortho._num_bootstraps = num_bootstraps
-    crossfid_superpos._num_bootstraps = num_bootstraps
-
-    same, same_std = crossfid.evaluate_cost_and_std(
-        results2, vectorise=True)
-    tmp1, tmp2 = crossfid.evaluate_cost_and_std(
-        results2, vectorise=False)
-    assert np.isclose(same, tmp1, atol=1E-4)  # , atol=0.01
-    assert np.isclose(same_std, tmp2, atol=1E-4)  # , atol=0.01
-
-    ortho, ortho_std = crossfid_ortho.evaluate_cost_and_std(
-        results2, vectorise=True)
-    tmp1, tmp2 = crossfid_ortho.evaluate_cost_and_std(
-        results2, vectorise=False)
-    assert np.isclose(ortho, tmp1, atol=1E-4)  # , atol=0.01
-    assert np.isclose(ortho_std, tmp2, atol=1E-4)  # , atol=0.01
-
-    superpos, superpos_std = crossfid_superpos.evaluate_cost_and_std(
-        results2, vectorise=True)
-    tmp1, tmp2 = crossfid_superpos.evaluate_cost_and_std(
-        results2, vectorise=False)
-    assert np.isclose(superpos, tmp1, atol=1E-4)  # , atol=0.01
-    assert np.isclose(superpos_std, tmp2, atol=1E-4)  # , atol=0.01
-
-    for mean, std, target in zip(
-        [same, ortho, superpos],
-        [same_std, ortho_std, superpos_std],
-        [1., 0., 0.5]
-    ):
-        np.isclose(mean, target, atol=0.1)
+        np.isclose(mean, target, atol=0.0001)
         # assert mean - 4*std < target
         # assert mean + 4*std > target
 
@@ -349,7 +293,7 @@ def test_cross_fidelity_subsampling_rand_meas_handler():
         return 'test_circ'+f'{idx}'
 
     transpile_instance = make_quantum_instance(_TEST_IBMQ_BACKEND)
-    exe_instance = QuantumInstance(Aer.get_backend('qasm_simulator'))
+    exe_instance = QuantumInstance(Aer.get_backend('aer_simulator'))
 
     ansatz = RandomAnsatz(2, 2, strict_transpile=True)
     rand_meas_handler = RandomMeasurementHandler(

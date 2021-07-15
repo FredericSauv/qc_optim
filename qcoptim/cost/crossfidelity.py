@@ -53,9 +53,13 @@ class CrossFidelity(CostInterface):
         mode : str, optional
             How to generate the random measurements, passed to 
             RandomMeasurementHandler constructor. Supported options:
+                'identity' : trivial case, do nothing
                 '1qHaar' : single qubit Haar random unitaries
-                'rypiOver3' : 1/3 of qubits are acted on by identities, 1/3 by 
+                'rypiOver3' : 1/3 of qubits are acted on by identities, 1/3 by
                               Ry(pi/3), and 1/3 by Ry(2pi/3)
+                'RzRy' : single qubit Haar random unitaries, generated from
+                         selecting euler angles using numpy random functions
+                         instead of qiskit random unitary function
         comparison_results : {dict, None, qiskit.results.Result}
             The use cases where None would be passed is if we are using
             this object to generate the comparison_results object for a
